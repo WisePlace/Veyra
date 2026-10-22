@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}IP geolocation · Veyra{% endblock %}
+{% block shell_class %}connect{% endblock %}
+{% block content %}
+<section class="card">
+  <h1 class="page-title">IP geolocation</h1>
+  <p class="sub">Locate an IP address or hostname and see its network owner.</p>
+
+  <form id="ip-form">
+    <input type="text" id="target" autocomplete="off" spellcheck="false" placeholder="8.8.8.8  or  example.com" required>
+    <button type="submit" id="ip-go" class="btn-primary">Locate</button>
+  </form>
+
+  <div id="ip-result" class="lookup-result" hidden></div>
+</section>
+
+<script>
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function field(label, inner) { return `<div class="field"><div class="flabel">${label}</div>${inner}</div>`; }
+const form = document.getElementById('ip-form');
+const go = document.getElementById('ip-go');
+const out = document.getElementById('ip-result');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const target = document.getElementById('target').value.trim();
+  out.hidden = false; out.className = 'lookup-result'; out.textContent = 'Working…';
+  go.disabled = true;
+  try {
+    const res = await fetch('/api/ip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }) });
+    const d = await res.json();
+    if (!d.ok) { out.className = 'lookup-result err'; out.textContent = d.error || 'Lookup failed.'; return; }
+    out.className = 'lookup-result';
+    const p = [];
+    p.push(field('IP', `<div class="gaia"><code>${esc(d.ip)}</code><button type="button" class="copy" data-copy="${esc(d.ip)}">copy</button></div>`));
+    const place = [d.city, d.region, (d.country || '') + (d.flag_emoji ? ' ' + d.flag_emoji : '')].filter(Boolean).join(', ');
+    if (place) p.push(field('Location', `<div>${esc(place)}</div>`));
+    if (d.postal) p.push(field('Postal code', `<div>${esc(d.postal)}</div>`));
+    if (d.latitude != null) p.push(field('Coordinates', `<div class="gaia"><code>${d.latitude}, ${d.longitude}</code><button type="button" class="copy" data-copy="${d.latitude}, ${d.longitude}">copy</button></div>`));
+    if (d.timezone) p.push(field('Timezone', `<div>${esc(d.timezone)}</div>`));
+    if (d.isp) p.push(field('ISP', `<div>${esc(d.isp)}</div>`));
+    if (d.org) p.push(field('Organization', `<div>${esc(d.org)}</div>`));
+    if (d.asn) p.push(field('ASN', `<div>${esc(String(d.asn))}${d.domain ? ' · ' + esc(d.domain) : ''}</div>`));
+    if (d.type) p.push(field('IP version', `<div>${esc(d.type)}</div>`));
+    if (d.maps_url) p.push(field('', `<a class="svc-link" href="${esc(d.maps_url)}" target="_blank" rel="noopener">View on Google Maps</a>`));
+    out.innerHTML = p.join('');
+    out.querySelectorAll('.copy').forEach(b => b.onclick = () => { navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'copied'; });
+  } catch (err) { out.className = 'lookup-result err'; out.textContent = 'Request failed: ' + err; }
+  finally { go.disabled = false; }
+});
+</script>
+{% endblock %}

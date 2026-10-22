@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Cert lookup · Veyra{% endblock %}
+{% block shell_class %}connect{% endblock %}
+{% block content %}
+<section class="card">
+  <h1 class="page-title">Cert lookup</h1>
+  <p class="sub">Discover subdomains and issued certificates for a domain, from public Certificate Transparency logs (crt.sh).</p>
+
+  <form id="cert-form">
+    <input type="text" id="domain" autocomplete="off" spellcheck="false" placeholder="example.com" required>
+    <button type="submit" id="cert-go" class="btn-primary">Look up</button>
+  </form>
+
+  <div id="cert-summary" class="user-summary" hidden></div>
+  <div id="cert-result" class="cert-result" hidden></div>
+</section>
+
+<script>
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+const form = document.getElementById('cert-form');
+const go = document.getElementById('cert-go');
+const summary = document.getElementById('cert-summary');
+const out = document.getElementById('cert-result');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const domain = document.getElementById('domain').value.trim();
+  summary.hidden = false; summary.className = 'user-summary'; summary.textContent = 'Querying crt.sh (can take a moment)…';
+  out.hidden = true; out.innerHTML = '';
+  go.disabled = true;
+  try {
+    const res = await fetch('/api/cert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain }) });
+    const d = await res.json();
+    if (!d.ok) { summary.className = 'user-summary err'; summary.textContent = d.error || 'Lookup failed.'; return; }
+    summary.innerHTML = `<strong>${d.count}</strong> unique subdomains across ${d.total_certs} certificates for <strong>${esc(d.domain)}</strong>.`;
+    const subs = d.subdomains.map(s =>
+      `<div class="u-item found"><span class="u-dot"></span><span class="u-name"><a href="https://${esc(s)}" target="_blank" rel="noopener">${esc(s)}</a></span></div>`).join('');
+    const certs = d.certs.map(c =>
+      `<div class="svc-card"><div class="svc-head"><span class="svc-name">${esc(c.common_name || '(no CN)')}</span><span class="svc-note">${esc((c.not_before || '').slice(0,10))} to ${esc((c.not_after || '').slice(0,10))}</span></div><div class="svc-note">${esc(c.issuer || '')}</div></div>`).join('');
+    out.innerHTML =
+      `<div class="field"><div class="flabel">Subdomains (${d.count})</div><div class="user-grid">${subs || '<div class="muted-note">None found.</div>'}</div></div>` +
+      `<div class="field"><div class="flabel">Recent certificates</div><div class="svc-list">${certs}</div></div>`;
+    out.hidden = false;
+  } catch (err) { summary.className = 'user-summary err'; summary.textContent = 'Request failed: ' + err; }
+  finally { go.disabled = false; }
+});
+</script>
+{% endblock %}

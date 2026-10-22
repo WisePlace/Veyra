@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Name search · Veyra{% endblock %}
+{% block shell_class %}connect{% endblock %}
+{% block content %}
+<section class="card">
+  <h1 class="page-title">Name search</h1>
+  <p class="sub">Build targeted search links for a person across engines, social networks and people-search sites. Add a keyword (city, employer) to narrow results.</p>
+
+  <form id="name-form">
+    <div class="name-row">
+      <input type="text" id="first" autocomplete="off" spellcheck="false" placeholder="First name">
+      <input type="text" id="last" autocomplete="off" spellcheck="false" placeholder="Last name">
+    </div>
+    <input type="text" id="keyword" autocomplete="off" spellcheck="false" placeholder="Optional keyword (city, company, job...)">
+    <button type="submit" id="name-go" class="btn-primary">Build searches</button>
+  </form>
+
+  <div id="name-result" class="cert-result" hidden></div>
+</section>
+
+<script>
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+const form = document.getElementById('name-form');
+const go = document.getElementById('name-go');
+const out = document.getElementById('name-result');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const first = document.getElementById('first').value.trim();
+  const last = document.getElementById('last').value.trim();
+  const keyword = document.getElementById('keyword').value.trim();
+  go.disabled = true;
+  try {
+    const res = await fetch('/api/name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first, last, keyword }) });
+    const d = await res.json();
+    if (!d.ok) { out.hidden = false; out.innerHTML = `<div class="lookup-result err">${esc(d.error || 'Failed.')}</div>`; return; }
+    out.innerHTML = d.groups.map(g => {
+      const links = g.links.map(l => `<a class="svc" href="${esc(l.url)}" target="_blank" rel="noopener"><span class="svc-name">${esc(l.label)}</span><span class="svc-go">open</span></a>`).join('');
+      return `<div class="field"><div class="flabel">${esc(g.name)}</div><div class="svc-list">${links}</div></div>`;
+    }).join('');
+    out.hidden = false;
+  } catch (err) { out.hidden = false; out.innerHTML = `<div class="lookup-result err">Request failed: ${esc(err)}</div>`; }
+  finally { go.disabled = false; }
+});
+</script>
+{% endblock %}

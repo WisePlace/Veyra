@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Google Services · Veyra{% endblock %}
+{% block shell_class %}connect{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="status"><span class="dot"></span> connected</div>
+  <h1 class="page-title">Google Services</h1>
+
+  <div class="tabs">
+    <button type="button" class="tab active" data-tab="identity">Identity</button>
+    <button type="button" class="tab" data-tab="wifi">Wi-Fi</button>
+    <button type="button" class="tab" data-tab="drive">Drive</button>
+  </div>
+
+  <div class="tabpanel" id="tab-identity">
+    <p class="sub">Look up a Google account by email address or Gaia ID.</p>
+    <form id="id-form">
+      <input type="text" id="id-query" autocomplete="off" spellcheck="false"
+        placeholder="target@gmail.com  or  103482... (Gaia ID)" required>
+      <button type="submit" id="id-go" class="btn-primary">Look up</button>
+    </form>
+    <div class="toggles">
+      <label class="opt"><input type="checkbox" id="opt-services"><span>Fetch service data (Calendar, Photos, Maps, account type)</span></label>
+      <label class="opt"><input type="checkbox" id="opt-raw"><span>Show raw JSON</span></label>
+    </div>
+    <div id="id-result" class="lookup-result" hidden></div>
+  </div>
+
+  <div class="tabpanel" id="tab-wifi" hidden>
+    <p class="sub">Approximate a location from Wi-Fi access points. Enter one or more <strong>BSSIDs</strong> (router MAC addresses, e.g. <code>a4:12:34:56:78:9b</code>), not the network name. Google usually needs 2 or more nearby ones.</p>
+    <form id="wifi-form">
+      <textarea id="wifi-bssids" rows="3" spellcheck="false"
+        placeholder="a4:12:34:56:78:9b, b8:27:eb:1a:2b:3c"></textarea>
+      <button type="submit" id="wifi-go" class="btn-primary">Locate</button>
+    </form>
+    <div id="wifi-result" class="lookup-result" hidden></div>
+  </div>
+
+  <div class="tabpanel" id="tab-drive" hidden>
+    <p class="sub">Inspect a public Google Drive, Docs, Sheets or Slides file. Paste its share link.</p>
+    <form id="drive-form">
+      <input type="text" id="drive-link" autocomplete="off" spellcheck="false"
+        placeholder="https://docs.google.com/document/d/FILE_ID/edit" required>
+      <button type="submit" id="drive-go" class="btn-primary">Scan</button>
+    </form>
+    <label class="opt raw-toggle"><input type="checkbox" id="drive-raw"><span>Show raw JSON</span></label>
+    <div id="drive-result" class="lookup-result" hidden></div>
+  </div>
+</section>
+
+<script>
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function field(label, inner) { return `<div class="field"><div class="flabel">${label}</div>${inner}</div>`; }
+function bindCopies(container) {
+  container.querySelectorAll('.copy').forEach(b => b.onclick = () => {
+    navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'copied';
+  });
+}
+function showError(el, msg) { el.hidden = false; el.className = 'lookup-result err'; el.textContent = msg; }
+function loading(el) { el.hidden = false; el.className = 'lookup-result'; el.textContent = 'Working…'; }
+
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+  const name = t.dataset.tab;
+  document.querySelectorAll('.tabpanel').forEach(p => p.hidden = (p.id !== 'tab-' + name));
+});
+
+const idForm = document.getElementById('id-form');
+const idOut = document.getElementById('id-result');
+const idGo = document.getElementById('id-go');
+const optServices = document.getElementById('opt-services');
+const optRaw = document.getElementById('opt-raw');
+let idData = null;
+
+optRaw.addEventListener('change', () => { if (idData) renderIdentity(idData); });
+
+function statusBadge(s) {
+  const cls = s === 'active' ? 'active' : (s === 'inactive' ? 'inactive' : 'unknown');
+  return `<span class="badge ${cls}">${esc(s)}</span>`;
+}
+
+function renderIdentity(data) {
+  idData = data;
+  if (!data.found) return showError(idOut, data.error || 'Not found.');
+  idOut.hidden = false; idOut.className = 'lookup-result';
+  const p = [];
+
+  if (data.gaia_id) p.push(field('Gaia ID',
+    `<div class="gaia"><code>${esc(data.gaia_id)}</code><button type="button" class="copy" data-copy="${esc(data.gaia_id)}">copy</button></div>`));
+  if (data.name) p.push(field('Name', `<div>${esc(data.name)}</div>`));
+  if (data.profile_photo) p.push(field('Profile photo',
+    `<a href="${esc(data.profile_photo)}" target="_blank" rel="noopener"><img class="ava" src="${esc(data.profile_photo)}" alt=""></a>`));
+  if (data.cover_photo) p.push(field('Cover photo',
+    `<a href="${esc(data.cover_photo)}" target="_blank" rel="noopener"><img class="cover" src="${esc(data.cover_photo)}" alt=""></a>`));
+  if (data.emails && data.emails.length) p.push(field('Emails', `<div>${data.emails.map(esc).join('<br>')}</div>`));
+  if (data.last_edit) p.push(field('Last profile edit', `<div>${esc(data.last_edit)}</div>`));
+  if (data.reachable_apps && data.reachable_apps.length)
+    p.push(field('Reachable apps', `<div class="chips">${data.reachable_apps.map(a => `<span class="chip">${esc(a)}</span>`).join('')}</div>`));
+
+  const sd = data.services_data;
+  if (sd && !sd.error) {
+    if (sd.account) {
+      const a = sd.account;
+      let acc = `<div>${esc(a.type || 'Unknown')}</div>`;
+      if (a.customer_id) acc += `<div class="muted-note">Customer ID: ${esc(a.customer_id)}</div>`;
+      if (a.entity) acc += `<div class="muted-note">Chat entity: ${esc(a.entity)}</div>`;
+      p.push(field('Account type', acc));
+    }
+    if (sd.results && sd.results.length) {
+      const rows = sd.results.map(s => {
+        let body = `<div class="svc-head"><span class="svc-name">${esc(s.name)}</span>${statusBadge(s.status)}</div>`;
+        if (s.detail) body += `<div class="svc-note">${esc(s.detail)}</div>`;
+        if (s.events && s.events.length) body += `<ul class="ev">${s.events.map(e => `<li>${esc(e.summary)}${e.when ? ' <span class="muted-note">' + esc(e.when) + '</span>' : ''}</li>`).join('')}</ul>`;
+        if (s.url) body += `<a class="svc-link" href="${esc(s.url)}" target="_blank" rel="noopener">open</a>`;
+        return `<div class="svc-card">${body}</div>`;
+      }).join('');
+      p.push(field('Services', `<div class="svc-list">${rows}</div>`));
+    }
+  } else if (sd && sd.error) {
+    p.push(field('Services', `<div class="muted-note">${esc(sd.error)}</div>`));
+  }
+
+  if (optRaw.checked && data.raw)
+    p.push(field('Raw response', `<pre class="raw">${esc(JSON.stringify(data.raw, null, 2))}</pre>`));
+
+  idOut.innerHTML = p.join('');
+  bindCopies(idOut);
+}
+
+idForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const query = document.getElementById('id-query').value.trim();
+  loading(idOut); idGo.disabled = true;
+  try {
+    const res = await fetch('/api/lookup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, services: optServices.checked })
+    });
+    renderIdentity(await res.json());
+  } catch (err) { showError(idOut, 'Request failed: ' + err); }
+  finally { idGo.disabled = false; }
+});
+
+const wifiForm = document.getElementById('wifi-form');
+const wifiOut = document.getElementById('wifi-result');
+const wifiGo = document.getElementById('wifi-go');
+
+wifiForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const bssids = document.getElementById('wifi-bssids').value.trim();
+  loading(wifiOut); wifiGo.disabled = true;
+  try {
+    const res = await fetch('/api/geolocate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bssids })
+    });
+    const d = await res.json();
+    if (!d.found) return showError(wifiOut, d.error || 'No location found.');
+    wifiOut.hidden = false; wifiOut.className = 'lookup-result';
+    const acc = d.accuracy != null ? ('around ' + Math.round(d.accuracy) + ' m') : '';
+    const p = [
+      field('Location', `<div class="gaia"><code>${d.lat}, ${d.lng}</code><button type="button" class="copy" data-copy="${d.lat}, ${d.lng}">copy</button></div>`),
+      field('Accuracy', `<div>${acc || 'unknown'}</div>`),
+      field('Access points used', `<div class="chips">${d.used.map(b => `<span class="chip">${esc(b)}</span>`).join('')}</div>`),
+      field('', `<a class="svc-link" href="${esc(d.maps_url)}" target="_blank" rel="noopener">View on Google Maps</a>`),
+    ];
+    wifiOut.innerHTML = p.join('');
+    bindCopies(wifiOut);
+  } catch (err) { showError(wifiOut, 'Request failed: ' + err); }
+  finally { wifiGo.disabled = false; }
+});
+
+const driveForm = document.getElementById('drive-form');
+const driveOut = document.getElementById('drive-result');
+const driveGo = document.getElementById('drive-go');
+const driveRaw = document.getElementById('drive-raw');
+let driveData = null;
+
+driveRaw.addEventListener('change', () => { if (driveData) renderDrive(driveData); });
+
+function renderDrive(d) {
+  driveData = d;
+  if (!d.found) return showError(driveOut, d.error || 'Not found.');
+  driveOut.hidden = false; driveOut.className = 'lookup-result';
+  const p = [];
+  if (d.name) p.push(field('Name', `<div>${esc(d.name)}</div>`));
+  if (d.kind) p.push(field('Type', `<div>${esc(d.kind)}</div>`));
+  if (d.owner_name || d.owner_email) {
+    let o = `<div>${esc(d.owner_name || '')}</div>`;
+    if (d.owner_email) o += `<div class="muted-note">${esc(d.owner_email)}</div>`;
+    p.push(field('Owner', o));
+  }
+  if (d.last_modifier) p.push(field('Last modified by', `<div>${esc(d.last_modifier)}</div>`));
+  if (d.created) p.push(field('Created', `<div>${esc(d.created)}</div>`));
+  if (d.modified) p.push(field('Modified', `<div>${esc(d.modified)}</div>`));
+  if (d.size) p.push(field('Size', `<div>${esc(d.size)} bytes</div>`));
+  if (d.shared != null) p.push(field('Shared', `<div>${d.shared ? 'yes' : 'no'}</div>`));
+  if (d.permissions && d.permissions.length)
+    p.push(field('Permissions', `<div class="chips">${d.permissions.map(pm => `<span class="chip">${esc((pm.role || '') + ' ' + (pm.type || ''))}</span>`).join('')}</div>`));
+  if (d.web_link) p.push(field('', `<a class="svc-link" href="${esc(d.web_link)}" target="_blank" rel="noopener">open in Drive</a>`));
+  if (driveRaw.checked && d.raw) p.push(field('Raw response', `<pre class="raw">${esc(JSON.stringify(d.raw, null, 2))}</pre>`));
+  driveOut.innerHTML = p.join('');
+}
+
+driveForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const link = document.getElementById('drive-link').value.trim();
+  loading(driveOut); driveGo.disabled = true;
+  try {
+    const res = await fetch('/api/drive', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ link })
+    });
+    renderDrive(await res.json());
+  } catch (err) { showError(driveOut, 'Request failed: ' + err); }
+  finally { driveGo.disabled = false; }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}DNS lookup · Veyra{% endblock %}
+{% block shell_class %}connect{% endblock %}
+{% block content %}
+<section class="card">
+  <h1 class="page-title">DNS lookup</h1>
+  <p class="sub">Resolve the DNS records of a domain (A, AAAA, MX, NS, TXT, CNAME, SOA, CAA), or reverse-resolve an IP.</p>
+
+  <form id="dns-form">
+    <input type="text" id="target" autocomplete="off" spellcheck="false" placeholder="example.com  or  8.8.8.8" required>
+    <button type="submit" id="dns-go" class="btn-primary">Resolve</button>
+  </form>
+
+  <div id="dns-summary" class="user-summary" hidden></div>
+  <div id="dns-result" class="cert-result" hidden></div>
+</section>
+
+<script>
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+const form = document.getElementById('dns-form');
+const go = document.getElementById('dns-go');
+const summary = document.getElementById('dns-summary');
+const out = document.getElementById('dns-result');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const target = document.getElementById('target').value.trim();
+  summary.hidden = false; summary.className = 'user-summary'; summary.textContent = 'Resolving…';
+  out.hidden = true; out.innerHTML = '';
+  go.disabled = true;
+  try {
+    const res = await fetch('/api/dns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }) });
+    const d = await res.json();
+    if (!d.ok) { summary.className = 'user-summary err'; summary.textContent = d.error || 'Lookup failed.'; return; }
+    const types = Object.keys(d.records).filter(t => d.records[t].length);
+    summary.innerHTML = `<strong>${types.length}</strong> record type(s) for <strong>${esc(d.target)}</strong>.`;
+    out.innerHTML = types.map(t => {
+      const rows = d.records[t].map(v => `<div class="u-item found"><span class="u-dot"></span><span class="u-name"><code>${esc(v)}</code></span></div>`).join('');
+      return `<div class="field"><div class="flabel">${esc(t)}</div><div class="user-grid">${rows}</div></div>`;
+    }).join('');
+    out.hidden = false;
+  } catch (err) { summary.className = 'user-summary err'; summary.textContent = 'Request failed: ' + err; }
+  finally { go.disabled = false; }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Identity lookup · Veyra{% endblock %}
+{% block shell_class %}connect{% endblock %}
+{% block content %}
+<section class="card">
+  <h1 class="page-title">Identity lookup</h1>
+  <p class="sub">Search a username, email or phone number to map someone's online presence.</p>
+
+  <div class="tabs">
+    <button type="button" class="tab active" data-type="username">Username</button>
+    <button type="button" class="tab" data-type="email">Email</button>
+    <button type="button" class="tab" data-type="phone">Phone</button>
+  </div>
+
+  <div class="tabpanel" id="panel-username">
+    <div class="choices">
+      <button type="button" class="choice active" id="mode-simple">
+        <span class="c-title">Simple search</span>
+        <span class="c-desc">The most known platforms, fast</span>
+      </button>
+      <button type="button" class="choice" id="mode-advanced">
+        <span class="c-title">Advanced search</span>
+        <span class="c-desc">Over a thousand sites, slower</span>
+      </button>
+    </div>
+    <form id="user-form" style="margin-top:18px">
+      <input type="text" id="username" autocomplete="off" spellcheck="false" placeholder="username" required>
+      <button type="submit" id="user-go" class="btn-primary">Search</button>
+    </form>
+    <div class="toggles">
+      <label class="opt"><input type="checkbox" id="only-found" checked><span>Show found only</span></label>
+    </div>
+    <div id="manual-check" hidden>
+      <div class="flabel" style="margin-top:18px">Check manually (login-walled)</div>
+      <div id="manual-grid" class="svc-list"></div>
+    </div>
+    <div id="user-summary" class="user-summary" hidden></div>
+    <div id="user-result" class="user-grid" hidden></div>
+  </div>
+
+  <div class="tabpanel" id="panel-email" hidden>
+    <p class="sub">Check which platforms an email address is registered on.</p>
+    <form id="email-form">
+      <input type="email" id="email" autocomplete="off" spellcheck="false" placeholder="name@example.com" required>
+      <button type="submit" id="email-go" class="btn-primary">Scan</button>
+    </form>
+    <div class="toggles">
+      <label class="opt"><input type="checkbox" id="email-only-found" checked><span>Show found only</span></label>
+    </div>
+    <div id="email-summary" class="user-summary" hidden></div>
+    <div id="email-result" class="user-grid" hidden></div>
+  </div>
+
+  <div class="tabpanel" id="panel-phone" hidden>
+    <form id="phone-form">
+      <input type="text" id="phone" autocomplete="off" spellcheck="false" placeholder="+33 6 12 34 56 78" required>
+      <button type="submit" id="phone-go" class="btn-primary">Search</button>
+    </form>
+    <div id="phone-result" class="lookup-result" hidden></div>
+  </div>
+</section>
+
+<script>
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function field(label, inner) { return `<div class="field"><div class="flabel">${label}</div>${inner}</div>`; }
+function showError(el, msg) { el.hidden = false; el.className = 'lookup-result err'; el.textContent = msg; }
+
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+  const type = t.dataset.type;
+  document.querySelectorAll('.tabpanel').forEach(p => p.hidden = (p.id !== 'panel-' + type));
+});
+
+const form = document.getElementById('user-form');
+const go = document.getElementById('user-go');
+const summary = document.getElementById('user-summary');
+const grid = document.getElementById('user-result');
+const onlyFound = document.getElementById('only-found');
+const modeSimple = document.getElementById('mode-simple');
+const modeAdvanced = document.getElementById('mode-advanced');
+let mode = 'simple', es = null, items = [], total = 0, done = 0, found = 0;
+
+modeSimple.onclick = () => setMode('simple');
+modeAdvanced.onclick = () => setMode('advanced');
+function setMode(m) { mode = m; modeSimple.classList.toggle('active', m === 'simple'); modeAdvanced.classList.toggle('active', m === 'advanced'); }
+
+const CONF_LABEL = { high: 'high confidence', medium: 'medium', low: 'low' };
+function rowHtml(r) {
+  const cls = r.status === 'found' ? 'found' : (r.status === 'absent' ? 'absent' : 'err');
+  const name = r.status === 'found' ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.name)}</a>` : esc(r.name);
+  let conf = '';
+  if (r.status === 'found' && r.confidence) conf = `<span class="conf conf-${r.confidence}">${CONF_LABEL[r.confidence] || r.confidence}</span>`;
+  return `<div class="u-item ${cls}"><span class="u-dot"></span><span class="u-name">${name}</span>${conf}<span class="u-cat">${esc(r.cat)}</span></div>`;
+}
+function renderUser() {
+  const rows = items.filter(r => !onlyFound.checked || r.status === 'found');
+  const order = { high: 0, medium: 1, low: 2 };
+  rows.sort((a, b) => (order[a.confidence] ?? 3) - (order[b.confidence] ?? 3) || a.name.localeCompare(b.name));
+  grid.innerHTML = rows.map(rowHtml).join('');
+  grid.hidden = rows.length === 0;
+}
+function updateSummary() {
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const tail = done < total ? ` (scanning ${done}/${total}, ${pct}%)` : '';
+  summary.innerHTML = `Found <strong>${found}</strong> of ${total} sites${tail}.`;
+}
+onlyFound.addEventListener('change', renderUser);
+
+const MANUAL = [
+  { name: 'Instagram', url: 'https://www.instagram.com/{u}/' },
+  { name: 'Facebook', url: 'https://www.facebook.com/{u}' },
+  { name: 'Reddit', url: 'https://www.reddit.com/user/{u}' },
+];
+function renderManual(username) {
+  const box = document.getElementById('manual-check');
+  const grid = document.getElementById('manual-grid');
+  grid.innerHTML = MANUAL.map(m => {
+    const url = m.url.replace('{u}', encodeURIComponent(username));
+    return `<a class="svc" href="${url}" target="_blank" rel="noopener"><span class="svc-name">${m.name}</span><span class="svc-note">verify by opening</span><span class="svc-go">open</span></a>`;
+  }).join('');
+  box.hidden = false;
+}
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const username = document.getElementById('username').value.trim();
+  renderManual(username);
+  if (es) { es.close(); es = null; }
+  items = []; total = 0; done = 0; found = 0;
+  grid.hidden = true; grid.innerHTML = '';
+  summary.hidden = false; summary.className = 'user-summary'; summary.textContent = 'Starting…';
+  go.disabled = true;
+  es = new EventSource(`/api/username/stream?u=${encodeURIComponent(username)}&mode=${mode}`);
+  es.addEventListener('meta', (ev) => { total = JSON.parse(ev.data).total; updateSummary(); });
+  es.addEventListener('result', (ev) => {
+    const r = JSON.parse(ev.data); items.push(r); done++;
+    if (r.status === 'found') found++;
+    updateSummary(); renderUser();
+  });
+  es.addEventListener('done', () => { es.close(); es = null; go.disabled = false; updateSummary(); renderUser(); });
+  es.addEventListener('error', (ev) => {
+    let msg = 'Search failed.';
+    try { if (ev.data) msg = JSON.parse(ev.data).error || msg; } catch (e) {}
+    summary.className = 'user-summary err'; summary.textContent = msg;
+    if (es) { es.close(); es = null; } go.disabled = false;
+  });
+});
+
+const emailForm = document.getElementById('email-form');
+const emailGo = document.getElementById('email-go');
+const emailSummary = document.getElementById('email-summary');
+const emailGrid = document.getElementById('email-result');
+const emailOnlyFound = document.getElementById('email-only-found');
+let emailEs = null, emailItems = [], emailTotal = 0, emailDone = 0, emailFound = 0;
+
+emailOnlyFound.addEventListener('change', renderEmail);
+function renderEmail() {
+  const rows = emailItems.filter(r => !emailOnlyFound.checked || r.status === 'found');
+  const order = { high: 0, medium: 1, low: 2 };
+  rows.sort((a, b) => (order[a.confidence] ?? 3) - (order[b.confidence] ?? 3) || a.name.localeCompare(b.name));
+  emailGrid.innerHTML = rows.map(rowHtml).join('');
+  emailGrid.hidden = rows.length === 0;
+}
+function emailSummaryUpdate() {
+  const tail = emailDone < emailTotal ? ` (scanning ${emailDone}/${emailTotal})` : '';
+  emailSummary.innerHTML = `Registered on <strong>${emailFound}</strong> of ${emailTotal} platforms${tail}.`;
+}
+
+emailForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const email = document.getElementById('email').value.trim();
+  if (emailEs) { emailEs.close(); emailEs = null; }
+  emailItems = []; emailTotal = 0; emailDone = 0; emailFound = 0;
+  emailGrid.hidden = true; emailGrid.innerHTML = '';
+  emailSummary.hidden = false; emailSummary.className = 'user-summary'; emailSummary.textContent = 'Starting…';
+  emailGo.disabled = true;
+  emailEs = new EventSource(`/api/email/stream?e=${encodeURIComponent(email)}`);
+  emailEs.addEventListener('meta', (ev) => { emailTotal = JSON.parse(ev.data).total; emailSummaryUpdate(); });
+  emailEs.addEventListener('result', (ev) => {
+    const r = JSON.parse(ev.data); emailItems.push(r); emailDone++;
+    if (r.status === 'found') emailFound++;
+    emailSummaryUpdate(); renderEmail();
+  });
+  emailEs.addEventListener('done', () => { emailEs.close(); emailEs = null; emailGo.disabled = false; emailSummaryUpdate(); renderEmail(); });
+  emailEs.addEventListener('error', (ev) => {
+    let msg = 'Scan failed.';
+    try { if (ev.data) msg = JSON.parse(ev.data).error || msg; } catch (e) {}
+    emailSummary.className = 'user-summary err'; emailSummary.textContent = msg;
+    if (emailEs) { emailEs.close(); emailEs = null; } emailGo.disabled = false;
+  });
+});
+
+const phoneForm = document.getElementById('phone-form');
+const phoneOut = document.getElementById('phone-result');
+const phoneGo = document.getElementById('phone-go');
+phoneForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const number = document.getElementById('phone').value.trim();
+  phoneOut.hidden = false; phoneOut.className = 'lookup-result'; phoneOut.textContent = 'Working…';
+  phoneGo.disabled = true;
+  try {
+    const res = await fetch('/api/phone', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ number }) });
+    const d = await res.json();
+    if (!d.ok) return showError(phoneOut, d.error || 'Lookup failed.');
+    phoneOut.className = 'lookup-result';
+    const badge = d.valid ? '<span class="badge active">valid</span>' : '<span class="badge inactive">not valid</span>';
+    const p = [
+      field('Number', `<div class="svc-head"><span>${esc(d.international)}</span>${badge}</div>`),
+      field('Country', `<div>${esc(d.region || '?')} (+${esc(d.country_code)})</div>`),
+    ];
+    if (d.location) p.push(field('Area', `<div>${esc(d.location)}</div>`));
+    if (d.carrier) p.push(field('Carrier', `<div>${esc(d.carrier)}</div>`));
+    p.push(field('Line type', `<div>${esc(d.line_type)}</div>`));
+    if (d.timezones && d.timezones.length) p.push(field('Timezones', `<div class="chips">${d.timezones.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>`));
+    p.push(field('Formats', `<div class="muted-note">E.164: ${esc(d.e164)}<br>National: ${esc(d.national)}</div>`));
+    phoneOut.innerHTML = p.join('');
+  } catch (err) { showError(phoneOut, 'Request failed: ' + err); }
+  finally { phoneGo.disabled = false; }
+});
+</script>
+{% endblock %}

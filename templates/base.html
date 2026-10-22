@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Veyra{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='veyra-mark.svg') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="page">
+    <main class="shell {% block shell_class %}{% endblock %}">
+      <header class="topbar">
+        <a class="logo" href="{{ url_for('home') }}">
+          <img src="{{ url_for('static', filename='veyra-mark.svg') }}" alt="">
+          <span class="word">Veyra</span>
+        </a>
+        {% if request.endpoint == 'google_tool' %}
+          <a class="link-muted" href="{{ url_for('disconnect') }}">disconnect</a>
+        {% endif %}
+      </header>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, msg in messages %}
+            <div class="flash flash-{{ category }}">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <p>An OSINT toolkit for authorized security research and personal use. Query only accounts you own or are authorised to investigate.</p>
+        <p>Veyra accesses only information Google already exposes to any signed-in user. You are solely responsible for complying with applicable laws and with Google's Terms of Service.</p>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

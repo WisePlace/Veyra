@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Google Services · Veyra{% endblock %}
+{% block shell_class %}connect{% endblock %}
+{% block content %}
+<section class="card">
+  <h1 class="page-title">Connect a Google account to continue</h1>
+  <p class="sub">Veyra reads the session from the browser through the Veyra Connect extension.</p>
+
+  <div class="choices">
+    <button type="button" class="choice" id="choice-ext">
+      <span class="c-title">Connect using the extension</span>
+      <span class="c-desc">Recommended</span>
+    </button>
+    <button type="button" class="choice" id="choice-cookie">
+      <span class="c-title">Connect with a session cookie</span>
+      <span class="c-desc">Paste cookies manually</span>
+    </button>
+  </div>
+
+  <div class="panel" id="panel-ext" hidden>
+    <div class="detect-row no" id="detect">
+      <span class="d-dot"></span><span id="detect-text">Checking for the extension…</span>
+    </div>
+
+    <div id="ext-note" class="ff-note" hidden></div>
+
+    <div id="ext-missing" hidden></div>
+
+    <div id="ext-ready" hidden>
+      <div class="busy">
+        <span class="spinner"></span>
+        <span>Waiting for a session from the extension…</span>
+      </div>
+      <p class="hint">Click the <strong>Veyra Connect</strong> icon in your toolbar, then <strong>Send session to Veyra</strong>.</p>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-cookie" hidden>
+    <p class="hint"><strong>Easiest:</strong> in the Veyra Connect extension popup, click <strong>Copy session cookie</strong>, then paste it below.</p>
+    <p class="hint" style="margin-top:14px"><strong>Or grab it manually from your browser:</strong></p>
+    <ol class="steps">
+      <li>In the browser where you're logged into your burner account, open <a href="https://photos.google.com" target="_blank" rel="noopener">photos.google.com</a>.</li>
+      <li>Open the developer tools: press <kbd>F12</kbd> (or right-click then <strong>Inspect</strong>).</li>
+      <li>Select the <strong>Network</strong> tab, then reload the page.</li>
+      <li>In the list of requests, click the first row whose name is <code>photos.google.com</code>.</li>
+      <li>Open the <strong>Headers</strong> sub-tab and scroll to <strong>Request Headers</strong>.</li>
+      <li>Find the row starting with <code>cookie:</code>, right-click its value then <strong>Copy value</strong>.</li>
+      <li>Paste it in the box below and click <strong>Connect</strong>.</li>
+    </ol>
+    <form method="post" action="{{ url_for('connect_cookies') }}">
+      <textarea name="cookies" rows="5" spellcheck="false"
+        placeholder="SID=...; HSID=...; SAPISID=...; ..."></textarea>
+      <button type="submit" class="btn-primary">Connect from pasted cookies</button>
+    </form>
+  </div>
+</section>
+
+<script>
+const choiceExt = document.getElementById('choice-ext');
+const choiceCookie = document.getElementById('choice-cookie');
+const panelExt = document.getElementById('panel-ext');
+const panelCookie = document.getElementById('panel-cookie');
+const detect = document.getElementById('detect');
+const detectText = document.getElementById('detect-text');
+const extReady = document.getElementById('ext-ready');
+const extMissing = document.getElementById('ext-missing');
+const extNote = document.getElementById('ext-note');
+
+function select(which) {
+  const ext = which === 'ext';
+  choiceExt.classList.toggle('active', ext);
+  choiceCookie.classList.toggle('active', !ext);
+  panelExt.hidden = !ext;
+  panelCookie.hidden = ext;
+}
+choiceExt.onclick = () => select('ext');
+choiceCookie.onclick = () => select('cookie');
+
+function copyLink(url) {
+  return `<button type="button" class="copylink" data-copy="${url}">${url}</button>`;
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.copylink');
+  if (!b) return;
+  navigator.clipboard.writeText(b.dataset.copy);
+  const old = b.textContent;
+  b.classList.add('copied');
+  b.textContent = 'copied';
+  setTimeout(() => { b.textContent = old; b.classList.remove('copied'); }, 1200);
+});
+
+const CHROMIUM = {
+  chrome: { name: 'Chrome', url: 'chrome://extensions', dev: 'top-right' },
+  edge:   { name: 'Edge',   url: 'edge://extensions',   dev: 'left sidebar' },
+  brave:  { name: 'Brave',  url: 'brave://extensions',  dev: 'top-right' },
+  opera:  { name: 'Opera',  url: 'opera://extensions',  dev: 'left sidebar' },
+};
+
+async function detectBrowser() {
+  const ua = navigator.userAgent;
+  try { if (navigator.brave && await navigator.brave.isBrave()) return 'brave'; } catch (e) {}
+  if (/Edg\//.test(ua)) return 'edge';
+  if (/OPR\//.test(ua) || /Opera/.test(ua)) return 'opera';
+  if (/Firefox\//.test(ua)) return 'firefox';
+  if (/Chrome\//.test(ua)) return 'chrome';
+  if (/Safari\//.test(ua)) return 'safari';
+  return 'chrome';
+}
+
+function chromiumGuide(g) {
+  return `
+    <p class="hint">The extension isn't installed in ${g.name} yet. Add it once:</p>
+    <ol class="steps">
+      <li>Open ${copyLink(g.url)}.</li>
+      <li>Turn on <strong>Developer mode</strong> (${g.dev}).</li>
+      <li>Click <strong>Load unpacked</strong> and select the <code>extension/veyra-connect/</code> folder.</li>
+      <li>Pin the icon, then <strong>refresh this page</strong>.</li>
+    </ol>`;
+}
+function firefoxGuide() {
+  return `
+    <p class="hint">Add the temporary extension to Firefox:</p>
+    <ol class="steps">
+      <li>Open ${copyLink('about:debugging#/runtime/this-firefox')}.</li>
+      <li>Click <strong>Load Temporary Add-on…</strong>.</li>
+      <li>Select <code>extension/veyra-connect/manifest.json</code>.</li>
+      <li>Then <strong>refresh this page</strong>.</li>
+    </ol>`;
+}
+function safariGuide() {
+  return `<p class="hint">Safari can't load this extension directly. Use <strong>Connect with a session cookie</strong> instead.</p>`;
+}
+
+let currentBrowser = 'chrome';
+let guideHTML = '';
+async function buildGuide() {
+  currentBrowser = await detectBrowser();
+  guideHTML = currentBrowser === 'firefox' ? firefoxGuide()
+            : currentBrowser === 'safari'  ? safariGuide()
+            : chromiumGuide(CHROMIUM[currentBrowser] || CHROMIUM.chrome);
+  if (!extMissing.hidden) extMissing.innerHTML = guideHTML;
+}
+
+function reflectDetection() {
+  const present = document.documentElement.hasAttribute('data-veyra-extension');
+
+  if (currentBrowser === 'firefox') {
+    detect.hidden = true;
+    extNote.hidden = true;
+    extMissing.hidden = false;
+    extMissing.innerHTML = guideHTML;
+    extReady.hidden = false;
+    return;
+  }
+
+  detect.hidden = false;
+  detect.classList.toggle('ok', present);
+  detect.classList.toggle('no', !present);
+  detectText.textContent = present ? 'Veyra Connect detected' : 'Veyra Connect not detected';
+  extNote.hidden = true;
+  extMissing.hidden = present;
+  if (!present) extMissing.innerHTML = guideHTML;
+  extReady.hidden = !present;
+}
+
+let tries = 0;
+function detectLoop() {
+  reflectDetection();
+  if (!document.documentElement.hasAttribute('data-veyra-extension') && tries++ < 10) {
+    setTimeout(detectLoop, 400);
+  }
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    if (d.connected) { window.location.href = "{{ url_for('google_tool') }}"; return; }
+  } catch (e) {}
+  setTimeout(pollStatus, 1500);
+}
+
+buildGuide().then(detectLoop);
+pollStatus();
+select('ext');
+</script>
+{% endblock %}
